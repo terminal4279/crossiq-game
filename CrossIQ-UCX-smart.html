@@ -57,6 +57,7 @@ html, body { overscroll-behavior: none; }
       <div class="subtitle">
         Opponent gets a single-use crossover when you take the center first. It’s usable only while someone stands on 9, only on the opponent’s turn, and it’s consumed the first time it’s used.
       </div>
+      <div id="netHint" class="subtitle" style="display:none;margin-top:-6px"></div>
       <div class="stack" style="margin:10px 0 18px">
         <label>Opponent:
           <select id="m_opponent"><option value="computer">Computer</option><option value="human">Human (same device)</option></select>
@@ -115,6 +116,25 @@ html, body { overscroll-behavior: none; }
 (function(){
   const CENTER_NODE = 9;
   const CROSS_CHOICES = [[6,12],[7,11],[8,10]];
+
+  // ---------- URL PARAMS FOR NETPLAY ----------
+  const url = new URL(location.href);
+  const ROOM_ID   = url.searchParams.get('room');          // e.g. "test"
+  const NETPLAY   = !!ROOM_ID;                              // net mode if room present
+  const ROLE      = (url.searchParams.get('role')||'host').toLowerCase(); // 'host' | 'guest'
+  const STARTROLE = (url.searchParams.get('start')||'host').toLowerCase();// who starts: 'host'|'guest'
+  const MY_CONTROLLER = (ROLE === 'host') ? 'player' : 'ai'; // which side this device controls
+
+  const WS_URL = NETPLAY
+    ? `wss://crossiq-rooms.kushal-s-kadam.workers.dev/room/${encodeURIComponent(ROOM_ID)}`
+    : null;
+
+  // Tiny hint on the menu when in netplay mode
+  const netHint = document.getElementById('netHint');
+  if (NETPLAY) {
+    netHint.style.display = '';
+    netHint.textContent = `Netplay: room="${ROOM_ID}", role="${ROLE}". Start is "${STARTROLE}".`;
+  }
 
   const X={L:120,C:300,R:480}, Y={T0:40,T:120,U:200,M:290,L:380,B:460,B0:540};
   const nodes=[
@@ -179,11 +199,21 @@ html, body { overscroll-behavior: none; }
     drawPieces('ai'); drawPieces('player');
     updateCrossoverIndicator();
   }
+
   function drawPieces(controller){
     for(const [idx,id] of STATE.pieces[controller].entries()){
       const n=nodes[id]; const locked=STATE.locked[controller][idx];
+
+      // ----- Only let THIS device click its own side in netplay -----
+      let isHuman;
+      if (NETPLAY) {
+        isHuman = (controller === MY_CONTROLLER);
+      } else {
+        // original behavior: human vs computer or human vs human (same device)
+        isHuman = (SETTINGS.opponent==='computer') ? (controller==='player') : true;
+      }
+
       const pieceType=(controller==='player')?ROLES.CONTROLS.playerSide:ROLES.CONTROLS.aiSide;
-      const isHuman=(SETTINGS.opponent==='computer')?(controller==='player'):true;
       if(pieceType==='cones'){
         const tri=el('polygon',{points:`${n.x},${n.y-22} ${n.x-18},${n.y+16} ${n.x+18},${n.y+16}`},'tri');
         if(isHuman && STATE.turn===controller && !STATE.lock && !locked) tri.addEventListener('click',()=>onPieceClick(controller,idx), {passive:true});
@@ -197,7 +227,7 @@ html, body { overscroll-behavior: none; }
   }
 
   function computeRoles(){
-    const yourSide=document.getElementById('m_side').value; 
+    const yourSide=document.getElementById('m_side').value;
     const startOpt=document.getElementById('m_start').value;
     const aiSide=(yourSide==='diamonds')?'cones':'diamonds';
     const startSide=(startOpt==='random')?(Math.random()<0.5?'diamonds':'cones'):startOpt;
@@ -246,7 +276,7 @@ html, body { overscroll-behavior: none; }
   }
 
   function neighbors(id){
-    const out=[]; 
+    const out=[];
     for(const [a,b] of edges){ if(a===id) out.push(b); else if(b===id) out.push(a); }
     if(isCrossoverActiveNow()){
       for(const [u,v] of eligibleCrossoverPairs()){
@@ -336,7 +366,7 @@ html, body { overscroll-behavior: none; }
     }
   }
 
-  // ---------- SMART AI ----------
+  // ---------- SMART AI (unchanged; disabled in netplay) ----------
   function dist(from,to){
     if(from===to) return 0;
     const q=[from], seen=new Set([from]); let d=0;
@@ -369,7 +399,7 @@ html, body { overscroll-behavior: none; }
     return out;
   }
 
-  function centerOccupiedBy(st){ 
+  function centerOccupiedBy(st){
     if (st.pieces.player.includes(9)) return 'player';
     if (st.pieces.ai.includes(9)) return 'ai';
     return null;
@@ -553,7 +583,11 @@ html, body { overscroll-behavior: none; }
 
   function onPieceClick(side,idx){
     if(STATE.lock||STATE.turn!==side) return;
-    if(SETTINGS.opponent==='computer' && side!=='player') return;
+
+    // In netplay, only allow this device to move its side
+    if (NETPLAY && side !== MY_CONTROLLER) return;
+
+    if(SETTINGS.opponent==='computer' && side!=='player' && !NETPLAY) return;
     const moves=legalMoves(side,idx);
     STATE.selected={side,idx,moves}; draw(); setStatus('Choose destination…');
     for(const to of moves){
@@ -567,21 +601,30 @@ html, body { overscroll-behavior: none; }
       board.appendChild(h); board.appendChild(hit);
     }
   }
+
   function onMoveChoose(side,to){
     if(STATE.lock) return;
     if(!STATE.selected || STATE.selected.side!==side) return;
+
+    // Netplay: enforce local control
+    if (NETPLAY && side !== MY_CONTROLLER) return;
+
     const idx=STATE.selected.idx; STATE.selected=null;
     Object.assign(STATE, applyMove(STATE,side,idx,to)); draw();
     maybeGrantCrossover(side, to);
     maybeLock(side,idx);
+
+    // ---- broadcast to room (if netplay) ----
+    try { if (NETPLAY) sendMove({ idx, to }); } catch {}
+
     if(STATE.locked.player.every(Boolean) || STATE.locked.ai.every(Boolean)){
       const w = STATE.locked.player.every(Boolean) ? 'player' : 'ai';
       return endGame(w);
     }
-    if(SETTINGS.opponent==='computer' && STATE.turn==='ai'){
+    if(!NETPLAY && SETTINGS.opponent==='computer' && STATE.turn==='ai'){
       refreshTurnBadge(); STATE.lock=true; setStatus('Computer thinking…'); setTimeout(aiTurn, 80);
     } else {
-      refreshTurnBadge(); setStatus('Your turn.');
+      refreshTurnBadge(); setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
     }
   }
 
@@ -622,7 +665,9 @@ html, body { overscroll-behavior: none; }
     const startOpt=document.getElementById('m_start').value;
     const opp=document.getElementById('m_opponent').value;
     const ai=document.getElementById('m_aiLevel').value;
-    SETTINGS.opponent=opp;
+
+    // In netplay, force "human" opponent (no AI)
+    SETTINGS.opponent = NETPLAY ? 'human' : opp;
 
     ROLES = (function compute(){
       const aiSide=(yourSide==='diamonds')?'cones':'diamonds';
@@ -635,18 +680,24 @@ html, body { overscroll-behavior: none; }
         aiGoals:     (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
         blockPlayerZeros: (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
         blockAIZeros:     (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
-        firstTurn: (startSide===yourSide)?'player':'ai',
-        aiLevel: ai
+        firstTurn: (startSide===yourSide)?'player':'ai'
       };
     })();
 
-    STATE.lock=false; STATE.turn=ROLES.firstTurn; STATE.firstMover=STATE.turn;
+    // If netplay: set a deterministic starter from URL (?start=host|guest)
+    if (NETPLAY) {
+      STATE.turn = (STARTROLE === 'host') ? 'player' : 'ai';
+    } else {
+      STATE.turn = ROLES.firstTurn;
+    }
+    STATE.firstMover = STATE.turn;
+
     resetWithRoles(); draw(); refreshTurnBadge(true);
     modal.style.display='none';
-    if(SETTINGS.opponent==='computer' && STATE.turn==='ai'){
+    if(!NETPLAY && SETTINGS.opponent==='computer' && STATE.turn==='ai'){
       setStatus('Computer starts…'); STATE.lock=true; setTimeout(aiTurn,100);
     } else {
-      setStatus('Your turn.');
+      setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
     }
   }
 
@@ -663,6 +714,47 @@ html, body { overscroll-behavior: none; }
   document.getElementById('goAgain').addEventListener('click', ()=>{
     modal.style.display='none'; newGame(true);
   });
+
+  // --------- WEBSOCKET LAYER (netplay only) ---------
+  let ws = null;
+  if (NETPLAY && WS_URL) {
+    try {
+      ws = new WebSocket(WS_URL);
+      ws.onopen    = () => console.log('WS connected → room:', ROOM_ID, 'role:', ROLE);
+      ws.onclose   = () => console.log('WS closed');
+      ws.onerror   = (e) => console.log('WS error', e);
+      ws.onmessage = (evt) => {
+        try { const msg = JSON.parse(evt.data); handleRemote(msg); }
+        catch { console.log('WS msg:', evt.data); }
+      };
+    } catch (e) {
+      console.log('WS connect failed', e);
+    }
+  }
+
+  function sendMove(move){
+    if (!NETPLAY || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type:'move', controller: MY_CONTROLLER, move, t: Date.now() }));
+  }
+
+  function handleRemote(msg){
+    if (msg.type !== 'move') return;
+    const { controller, move } = msg;     // controller: 'player'|'ai'
+    const { idx, to } = move;
+
+    // Ignore echoes from the same controller (safety)
+    if (controller === MY_CONTROLLER) return;
+
+    Object.assign(STATE, applyMove(STATE, controller, idx, to)); draw();
+    maybeGrantCrossover(controller, to);
+    maybeLock(controller, idx);
+
+    if(STATE.locked.player.every(Boolean) || STATE.locked.ai.every(Boolean)){
+      const w = STATE.locked.player.every(Boolean) ? 'player' : 'ai';
+      return endGame(w);
+    }
+    refreshTurnBadge(); setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
+  }
 })();
 </script>
 </body>
