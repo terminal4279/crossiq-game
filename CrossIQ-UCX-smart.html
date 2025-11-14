@@ -1,761 +1,913 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>CrossIQ – UCX (Smart AI)</title>
-<style>
-:root{--bg:#f3f4f6;--panel:#fff;--ink:#111827;--muted:#4b5563;--edge:#111827;
---tri:#ef4444;--tri2:#b91c1c;--dia:#3b82f6;--dia2:#1d4ed8;--goal:#059669;--accent:#4f46e5}
-*{box-sizing:border-box}html,body{margin:0;height:100%;font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--ink)}
-.wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px}
-.panel{background:var(--panel);border:1px solid #e5e7eb;border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.06);width:min(980px,96vw)}
-.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.toolbar .spacer{flex:1}
-button{padding:12px 16px;border-radius:14px;border:1px solid #cbd5e1;background:#f8fafc;font-weight:700;cursor:pointer;font-size:16px;line-height:1.2}
-button.primary{background:#eef2ff;border-color:#c7d2fe}
-button.cta{background:var(--accent);color:#fff;border-color:#4338ca}
-button.muted{background:#f3f4f6;color:#9ca3af;border-color:#e5e7eb;cursor:default}
-.status{padding:8px 10px;color:var(--muted);border-top:1px dashed #e5e7eb;margin-top:8px;min-height:24px}
-svg{
-  width:min(700px,100vw);
-  height:min(720px,70dvh);
-  background:#fff;border:1px solid #e5e7eb;border-radius:10px;display:block;margin:0 auto
-}
-.edge{stroke:var(--edge);stroke-width:6;stroke-linecap:round}
-.nodeDot{fill:#fff;stroke:var(--edge);stroke-width:3}
-.tri{fill:#ef4444;stroke:#b91c1c;stroke-width:2;cursor:pointer}
-.dia{fill:#3b82f6;stroke:#1d4ed8;stroke-width:2;cursor:pointer}
-.goal{stroke:var(--goal);stroke-dasharray:4 4;stroke-width:2;fill:transparent}
-.badge{font-weight:800;padding:8px 12px;border-radius:999px;border:1px solid #e5e7eb;background:#f8fafc}
-.badge.dia{background:#eff6ff;border-color:#dbeafe;color:#1d4ed8}
-.badge.tri{background:#fff1f2;border-color:#fecdd3;color:#b91c1c}
-.screen{display:none}.screen.active{display:block}.title{font-size:38px;font-weight:900;margin:8px 0 4px;text-align:center}
-.subtitle{color:#6b7280;margin-bottom:16px;text-align:center}
-.stack{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center}
-@media (max-width: 420px){
-  .stack, .toolbar { flex-direction: column; align-items: stretch; }
-  .toolbar .spacer { display: none; }
-  .badge { align-self: center; }
-}
-* { -webkit-tap-highlight-color: transparent; }
-#board, button { touch-action: manipulation; }
-html, body { overscroll-behavior: none; }
-.wrap {
-  padding-left: max(12px, env(safe-area-inset-left));
-  padding-right: max(12px, env(safe-area-inset-right));
-  padding-top: max(12px, env(safe-area-inset-top));
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
-}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <!-- MENU -->
-  <section id="menu" class="screen active">
-    <div class="panel" style="text-align:center;padding:24px">
-      <div class="title">CrossIQ – UCX</div>
-      <div class="subtitle">
-        Opponent gets a single-use crossover when you take the center first. It’s usable only while someone stands on 9, only on the opponent’s turn, and it’s consumed the first time it’s used.
-      </div>
-      <div id="netHint" class="subtitle" style="display:none;margin-top:-6px"></div>
-      <div class="stack" style="margin:10px 0 18px">
-        <label>Opponent:
-          <select id="m_opponent"><option value="computer">Computer</option><option value="human">Human (same device)</option></select>
-        </label>
-        <label>Your side:
-          <select id="m_side"><option value="diamonds">Diamonds</option><option value="cones">Cones</option></select>
-        </label>
-        <label>Who starts:
-          <select id="m_start"><option value="random">Random</option><option value="diamonds">Diamonds</option><option value="cones">Cones</option></select>
-        </label>
-        <label>AI:
-          <select id="m_aiLevel">
-            <option value="greedy">Greedy</option>
-            <option value="look1">Lookahead (1-ply)</option>
-            <option value="smart" selected>Smart (AlphaBeta)</option>
-          </select>
-        </label>
-      </div>
-      <button id="startBtn" class="cta">Start Game</button>
-      <div style="margin-top:10px;color:#6b7280;font-size:14px">
-        Hidden pairs: 6–12, 7–11, 8–10. If exactly one end is occupied and the other is free, all such pairs are enabled at once for the authorized side.
-      </div>
-    </div>
-  </section>
-
-  <!-- GAME -->
-  <section id="game" class="screen">
-    <div class="panel">
-      <div class="toolbar">
-        <button id="backMenu">← Main Menu</button>
-        <button id="newGame" class="primary">Play Again</button>
-        <div class="spacer"></div>
-        <!-- Indicator: shows when granted; greys out permanently after use -->
-        <button id="crossoverBtn" class="cta" style="display:none" disabled>⚡ Crossover</button>
-        <span id="turnBadge" class="badge">Starts: —</span>
-      </div>
-      <svg id="board" viewBox="0 0 600 700" aria-label="CrossIQ board"></svg>
-      <div class="status" id="status">Your turn.</div>
-    </div>
-  </section>
-</div>
-
-<!-- GAME OVER MODAL -->
-<div id="gameOver" class="modal" role="dialog" aria-modal="true" aria-labelledby="goTitle" style="position:fixed;inset:0;display:none;justify-content:center;align-items:center;background:rgba(0,0,0,.45)">
-  <div class="card" style="background:#fff;border-radius:16px;padding:20px;width:min(92vw,520px);border:1px solid #e5e7eb;box-shadow:0 20px 60px rgba(0,0,0,.25);text-align:center">
-    <h2 id="goTitle" style="margin:0 0 8px;font-size:28px"></h2>
-    <p id="goText" style="margin:0 0 16px;color:#334155"></p>
-    <div class="actions" style="display:flex;gap:12px;justify-content:center">
-      <button id="goMenu">Main Menu</button>
-      <button id="goAgain" class="cta">Play Again</button>
-    </div>
-  </div>
-</div>
-
-<script>
-(function(){
-  const CENTER_NODE = 9;
-  const CROSS_CHOICES = [[6,12],[7,11],[8,10]];
-
-  // ---------- URL PARAMS FOR NETPLAY ----------
-  const url = new URL(location.href);
-  const ROOM_ID   = url.searchParams.get('room');          // e.g. "test"
-  const NETPLAY   = !!ROOM_ID;                              // net mode if room present
-  const ROLE      = (url.searchParams.get('role')||'host').toLowerCase(); // 'host' | 'guest'
-  const STARTROLE = (url.searchParams.get('start')||'host').toLowerCase();// who starts: 'host'|'guest'
-  const MY_CONTROLLER = (ROLE === 'host') ? 'player' : 'ai'; // which side this device controls
-
-  const WS_URL = NETPLAY
-    ? `wss://crossiq-rooms.kushal-s-kadam.workers.dev/room/${encodeURIComponent(ROOM_ID)}`
-    : null;
-
-  // Tiny hint on the menu when in netplay mode
-  const netHint = document.getElementById('netHint');
-  if (NETPLAY) {
-    netHint.style.display = '';
-    netHint.textContent = `Netplay: room="${ROOM_ID}", role="${ROLE}". Start is "${STARTROLE}".`;
-  }
-
-  const X={L:120,C:300,R:480}, Y={T0:40,T:120,U:200,M:290,L:380,B:460,B0:540};
-  const nodes=[
-    {id:0,x:X.L,y:Y.T0},{id:1,x:X.C,y:Y.T0},{id:2,x:X.R,y:Y.T0},
-    {id:3,x:X.L,y:Y.T},{id:4,x:X.C,y:Y.T},{id:5,x:X.R,y:Y.T},
-    {id:6,x:X.L,y:Y.U},{id:7,x:X.C,y:Y.U},{id:8,x:X.R,y:Y.U},
-    {id:9,x:X.C,y:Y.M},
-    {id:10,x:X.L,y:Y.L},{id:11,x:X.C,y:Y.L},{id:12,x:X.R,y:Y.L},
-    {id:13,x:X.L,y:Y.B},{id:14,x:X.C,y:Y.B},{id:15,x:X.R,y:Y.B},
-    {id:16,x:X.L,y:Y.B0},{id:17,x:X.C,y:Y.B0},{id:18,x:X.R,y:Y.B0}
-  ];
-
-  const edges=[
-    [3,4],[4,5],[3,6],[5,8],[6,7],[7,8],
-    [4,7],[7,9],[9,11],[11,14],
-    [6,9],[8,9],[10,9],[12,9],
-    [10,11],[11,12],[10,13],[12,15],[13,14],[14,15],
-    [0,3],[1,4],[2,5],
-    [16,13],[17,14],[18,15]
-  ];
-
-  const menu=document.getElementById('menu'), game=document.getElementById('game');
-  const modal=document.getElementById('gameOver'), goTitle=document.getElementById('goTitle'), goText=document.getElementById('goText');
-  const board=document.getElementById('board'), statusEl=document.getElementById('status');
-  const turnBadge=document.getElementById('turnBadge');
-  const crossoverBtn=document.getElementById('crossoverBtn');
-
-  const DIAMOND_START=[13,14,15], CONE_START=[3,4,5];
-  const TOP_GOALS=[0,1,2], BOT_GOALS=[16,17,18];
-
-  const SETTINGS={ opponent:'computer' };
-  const STATE={
-    turn:'player', firstMover:null, selected:null, lock:false,
-    pieces:{ player:[], ai:[] },
-    locked:{ player:[false,false,false], ai:[false,false,false] },
-    crossover:{ granted:false, onceFor:null, used:false }
-  };
-  let ROLES=null;
-
-  const setStatus = (s)=>{ statusEl.textContent=s; };
-  const setTurnBadge=(who,initial=false)=>{
-    turnBadge.textContent=(initial?'Starts: ':'Turn: ')+who;
-    turnBadge.classList.remove('dia','tri');
-    if(who==='Diamonds') turnBadge.classList.add('dia'); else if(who==='Cones') turnBadge.classList.add('tri');
-  };
-  const refreshTurnBadge=(initial=false)=>{
-    const sideType=(STATE.turn==='player')?ROLES.CONTROLS.playerSide:ROLES.CONTROLS.aiSide;
-    setTurnBadge(sideType==='diamonds'?'Diamonds':'Cones', initial);
-  };
-
-  const occupied=(id)=>STATE.pieces.player.includes(id)||STATE.pieces.ai.includes(id);
-  const occupantAt=(id)=> STATE.pieces.player.includes(id) ? 'player' : (STATE.pieces.ai.includes(id) ? 'ai' : null);
-
-  function el(tag,attrs,cls){ const e=document.createElementNS('http://www.w3.org/2000/svg',tag);
-    for(const k in attrs)e.setAttribute(k,attrs[k]); if(cls)e.setAttribute('class',cls); return e; }
-
-  function draw(){
-    while(board.firstChild) board.removeChild(board.firstChild);
-    for(const [a,b] of edges){ const A=nodes[a],B=nodes[b]; board.appendChild(el('line',{x1:A.x,y1:A.y,x2:B.x,y2:B.y},'edge')); }
-    for(const n of nodes){ board.appendChild(el('circle',{cx:n.x,cy:n.y,r:10},'nodeDot')); }
-    ROLES.playerGoals.concat(ROLES.aiGoals).forEach(id=>{ const g=nodes[id]; board.appendChild(el('rect',{x:g.x-22,y:g.y-22,width:44,height:44,rx:6},'goal')); });
-    drawPieces('ai'); drawPieces('player');
-    updateCrossoverIndicator();
-  }
-
-  function drawPieces(controller){
-    for(const [idx,id] of STATE.pieces[controller].entries()){
-      const n=nodes[id]; const locked=STATE.locked[controller][idx];
-
-      // ----- Only let THIS device click its own side in netplay -----
-      let isHuman;
-      if (NETPLAY) {
-        isHuman = (controller === MY_CONTROLLER);
-      } else {
-        // original behavior: human vs computer or human vs human (same device)
-        isHuman = (SETTINGS.opponent==='computer') ? (controller==='player') : true;
-      }
-
-      const pieceType=(controller==='player')?ROLES.CONTROLS.playerSide:ROLES.CONTROLS.aiSide;
-      if(pieceType==='cones'){
-        const tri=el('polygon',{points:`${n.x},${n.y-22} ${n.x-18},${n.y+16} ${n.x+18},${n.y+16}`},'tri');
-        if(isHuman && STATE.turn===controller && !STATE.lock && !locked) tri.addEventListener('click',()=>onPieceClick(controller,idx), {passive:true});
-        board.appendChild(tri);
-      } else {
-        const dia=el('polygon',{points:`${n.x},${n.y-22} ${n.x-22},${n.y} ${n.x},${n.y+22} ${n.x+22},${n.y}`},'dia');
-        if(isHuman && STATE.turn===controller && !STATE.lock && !locked) dia.addEventListener('click',()=>onPieceClick(controller,idx), {passive:true});
-        board.appendChild(dia);
-      }
-    }
-  }
-
-  function computeRoles(){
-    const yourSide=document.getElementById('m_side').value;
-    const startOpt=document.getElementById('m_start').value;
-    const aiSide=(yourSide==='diamonds')?'cones':'diamonds';
-    const startSide=(startOpt==='random')?(Math.random()<0.5?'diamonds':'cones'):startOpt;
-    return {
-      CONTROLS:{ playerSide:yourSide, aiSide:aiSide },
-      playerStart: (yourSide==='diamonds')?DIAMOND_START.slice():CONE_START.slice(),
-      aiStart:     (yourSide==='diamonds')?CONE_START.slice():DIAMOND_START.slice(),
-      playerGoals: (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
-      aiGoals:     (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
-      blockPlayerZeros: (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
-      blockAIZeros:     (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
-      firstTurn: (startSide===yourSide)?'player':'ai'
-    };
-  }
-
-  // ---------- CROSSOVER RULES ----------
-  function opponent(side){ return side==='player' ? 'ai' : 'player'; }
-
-  function isCrossoverActiveNow(){
-    if(!STATE.crossover.granted) return false;
-    if(STATE.crossover.used) return false;
-    const onCenter = occupantAt(CENTER_NODE);
-    if(!onCenter) return false;
-    return STATE.turn === STATE.crossover.onceFor;
-  }
-
-  function eligibleCrossoverPairs(){
-    if(!isCrossoverActiveNow()) return [];
-    return CROSS_CHOICES.filter(([u,v])=>{
-      const uOcc = occupied(u), vOcc = occupied(v);
-      return (uOcc && !vOcc) || (vOcc && !uOcc);
-    });
-  }
-
-  function isCrossoverEdge(a,b){
-    return CROSS_CHOICES.some(([u,v])=> (a===u && b===v) || (a===v && b===u));
-  }
-
-  function maybeGrantCrossover(playerJustMoved, dstSquare){
-    if(STATE.crossover.granted) return;
-    if(dstSquare === CENTER_NODE){
-      STATE.crossover.granted = true;
-      STATE.crossover.onceFor = opponent(playerJustMoved);
-      updateCrossoverIndicator();
-    }
-  }
-
-  function neighbors(id){
-    const out=[];
-    for(const [a,b] of edges){ if(a===id) out.push(b); else if(b===id) out.push(a); }
-    if(isCrossoverActiveNow()){
-      for(const [u,v] of eligibleCrossoverPairs()){
-        if(id===u && !occupied(v)) out.push(v);
-        if(id===v && !occupied(u)) out.push(u);
-      }
-    }
-    return out;
-  }
-
-  function legalMoves(side, idx){
-    if(STATE.locked[side][idx]) return [];
-    const here = STATE.pieces[side][idx];
-    const blockSet=new Set(side==='player'?ROLES.blockPlayerZeros:ROLES.blockAIZeros);
-    return neighbors(here).filter(nb=>{
-      if(occupied(nb)) return false;
-      if(blockSet.has(nb)) return false;
-      return true;
-    });
-  }
-
-  function maybeLock(side, idx){
-    const pos=STATE.pieces[side][idx];
-    if(side==='player' && ROLES.playerGoals.includes(pos)) STATE.locked.player[idx]=true;
-    if(side==='ai' && ROLES.aiGoals.includes(pos)) STATE.locked.ai[idx]=true;
-  }
-  const atGoals=(side)=>STATE.locked[side].every(Boolean);
-
-  function applyMove(st,side,idx,to){
-    const from = st.pieces[side][idx];
-    const preLive = (
-      st.crossover.granted && !st.crossover.used &&
-      (st.pieces.player.includes(CENTER_NODE) || st.pieces.ai.includes(CENTER_NODE)) &&
-      st.turn === st.crossover.onceFor
-    );
-    const crossing = isCrossoverEdge(from, to);
-    const willConsume = preLive && crossing;
-
-    const ns={
-      turn:(side==='player')?'ai':'player',
-      selected:null,
-      pieces:{player:st.pieces.player.slice(),ai:st.pieces.ai.slice()},
-      locked:{player:st.locked.player.slice(),ai:st.locked.ai.slice()},
-      lock:false,
-      firstMover: st.firstMover,
-      crossover: JSON.parse(JSON.stringify(st.crossover))
-    };
-
-    ns.pieces[side][idx]=to;
-
-    if(!ns.crossover.granted && to===CENTER_NODE){
-      ns.crossover.granted = true;
-      ns.crossover.onceFor = (side==='player') ? 'ai' : 'player';
-    }
-
-    if(willConsume){
-      ns.crossover.used = true;
-      setStatus('Crossover consumed.');
-    }
-
-    if(side==='player' && ROLES.playerGoals.includes(to)) ns.locked.player[idx]=true;
-    if(side==='ai' && ROLES.aiGoals.includes(to)) ns.locked.ai[idx]=true;
-    return ns;
-  }
-
-  function sideLabelForController(controller){
-    const side = (controller==='player') ? ROLES.CONTROLS.playerSide : ROLES.CONTROLS.aiSide;
-    return side==='diamonds' ? 'Diamonds' : 'Cones';
-  }
-
-  function updateCrossoverIndicator(){
-    if(!STATE.crossover.granted){
-      crossoverBtn.style.display='none';
-      return;
-    }
-    const label = sideLabelForController(STATE.crossover.onceFor);
-    if(STATE.crossover.used){
-      crossoverBtn.textContent = '⚡ Crossover used';
-      crossoverBtn.classList.add('muted');
-      crossoverBtn.disabled = true;
-      crossoverBtn.style.display='';
-    }else{
-      crossoverBtn.textContent = '⚡ Crossover activated: ' + label;
-      crossoverBtn.classList.remove('muted');
-      crossoverBtn.disabled = true;
-      crossoverBtn.style.display='';
-    }
-  }
-
-  // ---------- SMART AI (unchanged; disabled in netplay) ----------
-  function dist(from,to){
-    if(from===to) return 0;
-    const q=[from], seen=new Set([from]); let d=0;
-    while(q.length){
-      d++;
-      for(let s=q.length;s>0;s--){
-        const cur=q.shift();
-        for(const nb of neighbors(cur)){
-          if(seen.has(nb)) continue;
-          if(nb===to) return d;
-          seen.add(nb); q.push(nb);
-        }
-      }
-    }
-    return 99;
-  }
-
-  function enumerateMoves(st,side){
-    const out=[];
-    for(let i=0;i<3;i++){
-      if(st.locked[side][i]) continue;
-      const here=st.pieces[side][i];
-      const blockSet = new Set(side==='player'?ROLES.blockPlayerZeros:ROLES.blockAIZeros);
-      for(const nb of neighbors(here)){
-        if(st.pieces.player.includes(nb) || st.pieces.ai.includes(nb)) continue;
-        if(blockSet.has(nb)) continue;
-        out.push({idx:i,from:here,to:nb});
-      }
-    }
-    return out;
-  }
-
-  function centerOccupiedBy(st){
-    if (st.pieces.player.includes(9)) return 'player';
-    if (st.pieces.ai.includes(9)) return 'ai';
-    return null;
-  }
-
-  function mobility(st, side){
-    let m=0;
-    for(let i=0;i<3;i++){
-      if(st.locked[side][i]) continue;
-      const here=st.pieces[side][i];
-      const blockSet=new Set(side==='player'?ROLES.blockPlayerZeros:ROLES.blockAIZeros);
-      for(const nb of neighbors(here)){
-        if(st.pieces.player.includes(nb) || st.pieces.ai.includes(nb)) continue;
-        if(blockSet.has(nb)) continue;
-        m++;
-      }
-    }
-    return m;
-  }
-
-  function evalAI(st){
-    const bestDist = (side, pos) => Math.min(...(side==='ai'?ROLES.aiGoals:ROLES.playerGoals).map(g=>dist(pos,g)));
-    let aiProg=0, plProg=0;
-    for(let i=0;i<3;i++){
-      const aPos=st.pieces.ai[i], pPos=st.pieces.player[i];
-      aiProg += st.locked.ai[i] ? 50 : (30 - bestDist('ai', aPos));
-      plProg += st.locked.player[i] ? 50 : (30 - bestDist('player', pPos));
-    }
-    let centerScore=0;
-    const onC = centerOccupiedBy(st);
-    if(onC==='ai') centerScore -= 3;
-    else if(onC==='player') centerScore += 3;
-    let cross=0;
-    if (st.crossover.granted && !st.crossover.used){
-      if (st.turn === st.crossover.onceFor){
-        cross += (st.turn==='ai') ? 8 : -8;
-      }
-    }
-    const aiMob = mobility(st,'ai');
-    const plMob = mobility(st,'player');
-    const mob = (aiMob - plMob) * 0.6;
-    const lockAdv = (st.locked.ai.filter(Boolean).length - st.locked.player.filter(Boolean).length) * 6;
-    return (aiProg - plProg) + centerScore + cross + mob + lockAdv;
-  }
-
-  function scoreMoveHeur(st, side, m){
-    const useCross = isCrossoverEdge(m.from, m.to) ? 5 : 0;
-    const goals = (side==='ai'?ROLES.aiGoals:ROLES.playerGoals);
-    const before = Math.min(...goals.map(g=>dist(m.from, g)));
-    const after  = Math.min(...goals.map(g=>dist(m.to, g)));
-    const step = (before - after);
-    return (useCross*3) + step;
-  }
-
-  const TT = new Map();
-  function hashKey(st){
-    return [
-      st.turn,
-      st.pieces.player.join('-'),
-      st.pieces.ai.join('-'),
-      st.locked.player.map(n=>n?1:0).join(''),
-      st.locked.ai.map(n=>n?1:0).join(''),
-      st.crossover.granted?1:0,
-      st.crossover.used?1:0,
-      st.crossover.onceFor||'-'
-    ].join('|');
-  }
-
-  function winner(st){
-    const playerWin = st.locked.player.every(Boolean);
-    const aiWin = st.locked.ai.every(Boolean);
-    if(playerWin) return 'player';
-    if(aiWin) return 'ai';
-    return null;
-  }
-
-  function applyMoveClone(st,side,idx,to){ return applyMove(st,side,idx,to); }
-
-  function alphaBeta(st, depth, alpha, beta, maximizing, deadlineMs){
-    if(Date.now() > deadlineMs) return {score: evalAI(st), cutoff:true};
-    const win = winner(st);
-    if(win) return {score: (win==='ai'? 9999 : -9999)};
-    if(depth===0) return {score: evalAI(st)};
-
-    const side = maximizing ? 'ai' : 'player';
-    const moves = enumerateMoves(st, side);
-    if(!moves.length){
-      const ns = Object.assign({}, st, { turn: (side==='ai')?'player':'ai' });
-      return alphaBeta(ns, depth-1, alpha, beta, !maximizing, deadlineMs);
-    }
-
-    moves.sort((a,b)=> scoreMoveHeur(st, side, b) - scoreMoveHeur(st, side, a));
-
-    const key = hashKey(st);
-    const tt = TT.get(key);
-    if(tt && tt.depth >= depth){
-      return {score: tt.score};
-    }
-
-    let bestMove=null;
-
-    if(maximizing){
-      let value = -1e9;
-      for(const m of moves){
-        const s2 = applyMoveClone(st, side, m.idx, m.to);
-        const r = alphaBeta(s2, depth-1, alpha, beta, false, deadlineMs);
-        if(r.cutoff) return r;
-        if(r.score > value){ value=r.score; bestMove=m; }
-        alpha = Math.max(alpha, value);
-        if(alpha >= beta) break;
-      }
-      TT.set(key, {depth, score:value});
-      return {score:value, move:bestMove};
-    }else{
-      let value = 1e9;
-      for(const m of moves){
-        const s2 = applyMoveClone(st, side, m.idx, m.to);
-        const r = alphaBeta(s2, depth-1, alpha, beta, true, deadlineMs);
-        if(r.cutoff) return r;
-        if(r.score < value){ value=r.score; bestMove=m; }
-        beta = Math.min(beta, value);
-        if(alpha >= beta) break;
-      }
-      TT.set(key, {depth, score:value});
-      return {score:value, move:bestMove};
-    }
-  }
-
-  function chooseSmart(st){
-    const timeBudgetMs = 260;
-    const deadline = Date.now() + timeBudgetMs;
-    TT.clear();
-    let best=null;
-    for(let d=2; d<=6; d++){
-      const r = alphaBeta(st, d, -1e9, 1e9, true, deadline);
-      if(r.cutoff) break;
-      if(r.move) best = r.move;
-    }
-    if(!best){
-      const mv=enumerateMoves(st,'ai');
-      return mv.length ? mv.sort((a,b)=> scoreMoveHeur(st,'ai',b)-scoreMoveHeur(st,'ai',a))[0] : null;
-    }
-    return best;
-  }
-
-  function chooseGreedy(st){
-    const mv=enumerateMoves(st,'ai');
-    if(!mv.length) return null;
-    let best=null,score=-1e9;
-    for(const m of mv){
-      const sc = scoreMoveHeur(st,'ai',m);
-      if(sc>score || (sc===score && Math.random()<.3)){ score=sc; best=m; }
-    }
-    return best;
-  }
-
-  function chooseLook1(st){
-    const mv=enumerateMoves(st,'ai'); if(!mv.length) return null;
-    let best=null,score=-1e9;
-    for(const m of mv){
-      const s1=applyMoveClone(st,'ai',m.idx,m.to);
-      const pl=enumerateMoves(s1,'player');
-      let worst=Infinity;
-      if(!pl.length) worst=evalAI(s1);
-      else for(const pm of pl){
-        const sc=evalAI(applyMoveClone(s1,'player',pm.idx,pm.to));
-        if(sc<worst) worst=sc;
-      }
-      if(worst>score){ score=worst; best=m; }
-    }
-    return best;
-  }
-
-  const chooser = ()=>{
-    const mode = document.getElementById('m_aiLevel').value;
-    if(mode==='smart') return chooseSmart;
-    if(mode==='look1') return chooseLook1;
-    return chooseGreedy;
-  };
-  // ---------- End SMART AI ----------
-
-  function onPieceClick(side,idx){
-    if(STATE.lock||STATE.turn!==side) return;
-
-    // In netplay, only allow this device to move its side
-    if (NETPLAY && side !== MY_CONTROLLER) return;
-
-    if(SETTINGS.opponent==='computer' && side!=='player' && !NETPLAY) return;
-    const moves=legalMoves(side,idx);
-    STATE.selected={side,idx,moves}; draw(); setStatus('Choose destination…');
-    for(const to of moves){
-      const n=nodes[to];
-      const h=el('circle',{cx:n.x,cy:n.y,r:18},null);
-      h.setAttribute('fill','#dc2626');
-      h.setAttribute('opacity','0.30');
-      const hit=el('rect',{x:n.x-28,y:n.y-28,width:56,height:56,fill:'transparent'});
-      hit.style.cursor='pointer';
-      hit.addEventListener('click',()=>onMoveChoose(side,to), {passive:true});
-      board.appendChild(h); board.appendChild(hit);
-    }
-  }
-
-  function onMoveChoose(side,to){
-    if(STATE.lock) return;
-    if(!STATE.selected || STATE.selected.side!==side) return;
-
-    // Netplay: enforce local control
-    if (NETPLAY && side !== MY_CONTROLLER) return;
-
-    const idx=STATE.selected.idx; STATE.selected=null;
-    Object.assign(STATE, applyMove(STATE,side,idx,to)); draw();
-    maybeGrantCrossover(side, to);
-    maybeLock(side,idx);
-
-    // ---- broadcast to room (if netplay) ----
-    try { if (NETPLAY) sendMove({ idx, to }); } catch {}
-
-    if(STATE.locked.player.every(Boolean) || STATE.locked.ai.every(Boolean)){
-      const w = STATE.locked.player.every(Boolean) ? 'player' : 'ai';
-      return endGame(w);
-    }
-    if(!NETPLAY && SETTINGS.opponent==='computer' && STATE.turn==='ai'){
-      refreshTurnBadge(); STATE.lock=true; setStatus('Computer thinking…'); setTimeout(aiTurn, 80);
-    } else {
-      refreshTurnBadge(); setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
-    }
-  }
-
-  function aiTurn(){
-    const mv = (chooser())(STATE) || (function fallback(){ const all=enumerateMoves(STATE,'ai'); return all.length ? all[Math.floor(Math.random()*all.length)] : null; })();
-    if(!mv){ STATE.turn='player'; STATE.lock=false; draw(); refreshTurnBadge(); return setStatus('Computer passes. Your turn.'); }
-    Object.assign(STATE, applyMove(STATE,'ai',mv.idx,mv.to)); draw();
-    maybeGrantCrossover('ai', STATE.pieces.ai[mv.idx]);
-    maybeLock('ai',mv.idx);
-    if(STATE.locked.player.every(Boolean) || STATE.locked.ai.every(Boolean)){
-      const w = STATE.locked.player.every(Boolean) ? 'player' : 'ai';
-      return endGame(w);
-    }
-    STATE.lock=false; refreshTurnBadge(); setStatus('Your turn.');
-  }
-
-  function endGame(w){
-    STATE.lock=true;
-    const humanSide = ROLES.CONTROLS.playerSide;
-    const winnerLabel = (w==='player') ? (humanSide==='diamonds'?'Diamonds':'Cones')
-                                       : (ROLES.CONTROLS.aiSide==='diamonds'?'Diamonds':'Cones');
-    setStatus(winnerLabel+' win!');
-    goTitle.textContent = winnerLabel+' win! 🎉';
-    goText.textContent = 'Want another round?';
-    modal.style.display='flex';
-  }
-
-  function resetWithRoles(){
-    STATE.pieces.player = ROLES.playerStart.slice();
-    STATE.pieces.ai     = ROLES.aiStart.slice();
-    STATE.locked = { player:[false,false,false], ai:[false,false,false] };
-    STATE.selected = null;
-    STATE.crossover = { granted:false, onceFor:null, used:false };
-  }
-
-  function newGame(initial=false){
-    const yourSide=document.getElementById('m_side').value;
-    const startOpt=document.getElementById('m_start').value;
-    const opp=document.getElementById('m_opponent').value;
-    const ai=document.getElementById('m_aiLevel').value;
-
-    // In netplay, force "human" opponent (no AI)
-    SETTINGS.opponent = NETPLAY ? 'human' : opp;
-
-    ROLES = (function compute(){
-      const aiSide=(yourSide==='diamonds')?'cones':'diamonds';
-      const startSide=(startOpt==='random')?(Math.random()<0.5?'diamonds':'cones'):startOpt;
-      return {
-        CONTROLS:{ playerSide:yourSide, aiSide:aiSide },
-        playerStart: (yourSide==='diamonds')?DIAMOND_START.slice():CONE_START.slice(),
-        aiStart:     (yourSide==='diamonds')?CONE_START.slice():DIAMOND_START.slice(),
-        playerGoals: (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
-        aiGoals:     (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
-        blockPlayerZeros: (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
-        blockAIZeros:     (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
-        firstTurn: (startSide===yourSide)?'player':'ai'
-      };
-    })();
-
-    // If netplay: set a deterministic starter from URL (?start=host|guest)
-    if (NETPLAY) {
-      STATE.turn = (STARTROLE === 'host') ? 'player' : 'ai';
-    } else {
-      STATE.turn = ROLES.firstTurn;
-    }
-    STATE.firstMover = STATE.turn;
-
-    resetWithRoles(); draw(); refreshTurnBadge(true);
-    modal.style.display='none';
-    if(!NETPLAY && SETTINGS.opponent==='computer' && STATE.turn==='ai'){
-      setStatus('Computer starts…'); STATE.lock=true; setTimeout(aiTurn,100);
-    } else {
-      setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
-    }
-  }
-
-  document.getElementById('startBtn').addEventListener('click', ()=>{
-    menu.classList.remove('active'); game.classList.add('active'); newGame(true);
-  });
-  document.getElementById('backMenu').addEventListener('click', ()=>{
-    menu.classList.add('active'); game.classList.remove('active');
-  });
-  document.getElementById('newGame').addEventListener('click', ()=> newGame(true));
-  document.getElementById('goMenu').addEventListener('click', ()=>{
-    modal.style.display='none'; menu.classList.add('active'); game.classList.remove('active');
-  });
-  document.getElementById('goAgain').addEventListener('click', ()=>{
-    modal.style.display='none'; newGame(true);
-  });
-
-  // --------- WEBSOCKET LAYER (netplay only) ---------
-  let ws = null;
-  if (NETPLAY && WS_URL) {
-    try {
-      ws = new WebSocket(WS_URL);
-      ws.onopen    = () => console.log('WS connected → room:', ROOM_ID, 'role:', ROLE);
-      ws.onclose   = () => console.log('WS closed');
-      ws.onerror   = (e) => console.log('WS error', e);
-      ws.onmessage = (evt) => {
-        try { const msg = JSON.parse(evt.data); handleRemote(msg); }
-        catch { console.log('WS msg:', evt.data); }
-      };
-    } catch (e) {
-      console.log('WS connect failed', e);
-    }
-  }
-
-  function sendMove(move){
-    if (!NETPLAY || !ws || ws.readyState !== 1) return;
-    ws.send(JSON.stringify({ type:'move', controller: MY_CONTROLLER, move, t: Date.now() }));
-  }
-
-  function handleRemote(msg){
-    if (msg.type !== 'move') return;
-    const { controller, move } = msg;     // controller: 'player'|'ai'
-    const { idx, to } = move;
-
-    // Ignore echoes from the same controller (safety)
-    if (controller === MY_CONTROLLER) return;
-
-    Object.assign(STATE, applyMove(STATE, controller, idx, to)); draw();
-    maybeGrantCrossover(controller, to);
-    maybeLock(controller, idx);
-
-    if(STATE.locked.player.every(Boolean) || STATE.locked.ai.every(Boolean)){
-      const w = STATE.locked.player.every(Boolean) ? 'player' : 'ai';
-      return endGame(w);
-    }
-    refreshTurnBadge(); setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
-  }
-})();
-</script>
-</body>
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <title>CrossIQ – UCX (Smart AI)</title>
+        <style>
+            :root{--bg:#f3f4f6;--panel:#fff;--ink:#111827;--muted:#4b5563;--edge:#111827;
+                --tri:#ef4444;--tri2:#b91c1c;--dia:#3b82f6;--dia2:#1d4ed8;--goal:#059669;--accent:#4f46e5}
+            *{box-sizing:border-box}html,body{margin:0;height:100%;font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--ink)}
+            .wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px}
+            .panel{background:var(--panel);border:1px solid #e5e7eb;border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.06);width:min(980px,96vw)}
+            .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.toolbar .spacer{flex:1}
+            button{padding:12px 16px;border-radius:14px;border:1px solid #cbd5e1;background:#f8fafc;font-weight:700;cursor:pointer;font-size:16px;line-height:1.2}
+            button.primary{background:#eef2ff;border-color:#c7d2fe}
+            button.cta{background:var(--accent);color:#fff;border-color:#4338ca}
+            button.muted{background:#f3f4f6;color:#9ca3af;border-color:#e5e7eb;cursor:default}
+            .status{padding:8px 10px;color:var(--muted);border-top:1px dashed #e5e7eb;margin-top:8px;min-height:24px}
+            svg{
+                width:min(700px,100vw);
+                height:min(720px,70dvh);
+                background:#fff;border:1px solid #e5e7eb;border-radius:10px;display:block;margin:0 auto
+            }
+            .edge{stroke:var(--edge);stroke-width:6;stroke-linecap:round}
+            .nodeDot{fill:#fff;stroke:var(--edge);stroke-width:3}
+            .tri{fill:#ef4444;stroke:#b91c1c;stroke-width:2;cursor:pointer}
+            .dia{fill:#3b82f6;stroke:#1d4ed8;stroke-width:2;cursor:pointer}
+            .goal{stroke:var(--goal);stroke-dasharray:4 4;stroke-width:2;fill:transparent}
+            .badge{font-weight:800;padding:8px 12px;border-radius:999px;border:1px solid #e5e7eb;background:#f8fafc}
+            .badge.dia{background:#eff6ff;border-color:#dbeafe;color:#1d4ed8}
+            .badge.tri{background:#fff1f2;border-color:#fecdd3;color:#b91c1c}
+            .screen{display:none}.screen.active{display:block}.title{font-size:38px;font-weight:900;margin:8px 0 4px;text-align:center}
+            .subtitle{color:#6b7280;margin-bottom:16px;text-align:center}
+            .stack{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center}
+            @media (max-width: 420px){
+                .stack, .toolbar { flex-direction: column; align-items: stretch; }
+                .toolbar .spacer { display: none; }
+                .badge { align-self: center; }
+            }
+            * { -webkit-tap-highlight-color: transparent; }
+            #board, button { touch-action: manipulation; }
+            html, body { overscroll-behavior: none; }
+            .wrap {
+                padding-left: max(12px, env(safe-area-inset-left));
+                padding-right: max(12px, env(safe-area-inset-right));
+                padding-top: max(12px, env(safe-area-inset-top));
+                padding-bottom: max(12px, env(safe-area-inset-bottom));
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <!-- MENU -->
+            <section id="menu" class="screen active">
+                <div class="panel" style="text-align:center;padding:24px">
+                    <div class="title">CrossIQ – UCX</div>
+                    <div class="subtitle">
+                        Opponent gets a single-use crossover when you take the center first. It’s usable only while someone stands on 9, only on the opponent’s turn, and it’s consumed the first time it’s used.
+                    </div>
+                    <div id="netHint" class="subtitle" style="display:none;margin-top:-6px"></div>
+                    <div class="stack" style="margin:10px 0 18px">
+
+                      <!-- LOCAL / OFFLINE CONTROLS (original behaviour) -->
+                      <div id="localControls">
+                        <label>Opponent:
+                          <select id="m_opponent">
+                            <option value="computer">Computer</option>
+                            <option value="human">Human (same device)</option>
+                          </select>
+                        </label>
+                        <label>Your side:
+                          <select id="m_side">
+                            <option value="diamonds">Diamonds</option>
+                            <option value="cones">Cones</option>
+                          </select>
+                        </label>
+                        <label>Who starts:
+                          <select id="m_start">
+                            <option value="random">Random</option>
+                            <option value="diamonds">Diamonds</option>
+                            <option value="cones">Cones</option>
+                          </select>
+                        </label>
+                        <label>AI:
+                          <select id="m_aiLevel">
+                            <option value="greedy">Greedy</option>
+                            <option value="look1">Lookahead (1-ply)</option>
+                            <option value="smart" selected>Smart (AlphaBeta)</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <!-- NETPLAY CONTROLS (only used when ?room=... in URL) -->
+                      <div id="netControls" style="display:none; flex-direction:column; gap:8px; align-items:center;">
+
+                        <!-- HOST VIEW -->
+                        <div id="netRoleHost" style="display:none; text-align:left; max-width: 420px;">
+                          <div style="margin-bottom:8px;font-weight:600">
+                            You are hosting room: <span id="roomNameLabel"></span>
+                          </div>
+                          <label>Your side:
+                            <select id="net_side">
+                              <option value="diamonds">Diamonds</option>
+                              <option value="cones">Cones</option>
+                            </select>
+                          </label>
+                          <div style="font-size:13px;color:#6b7280;margin-top:4px">
+                            Starting player will be chosen randomly after a guest joins.
+                          </div>
+                        </div>
+
+                        <!-- GUEST VIEW -->
+                        <div id="netRoleGuest" style="display:none; text-align:center; max-width: 420px;">
+                          <div style="margin-bottom:8px;font-weight:600">
+                            You are joining room: <span id="roomNameLabelGuest"></span>
+                          </div>
+                          <div style="font-size:14px;color:#6b7280">
+                            Waiting for host to start the game…
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button id="startBtn" class="cta">Start Game</button>
+                    <div style="margin-top:10px;color:#6b7280;font-size:14px">
+                        Hidden pairs: 6–12, 7–11, 8–10. If exactly one end is occupied and the other is free, all such pairs are enabled at once for the authorized side.
+                    </div>
+                </div>
+            </section>
+            
+            <!-- GAME -->
+            <section id="game" class="screen">
+                <div class="panel">
+                    <div class="toolbar">
+                        <button id="backMenu">← Main Menu</button>
+                        <button id="newGame" class="primary">Play Again</button>
+                        <div class="spacer"></div>
+                        <!-- Indicator: shows when granted; greys out permanently after use -->
+                        <button id="crossoverBtn" class="cta" style="display:none" disabled>⚡ Crossover</button>
+                        <span id="turnBadge" class="badge">Starts: —</span>
+                    </div>
+                    <svg id="board" viewBox="0 0 600 700" aria-label="CrossIQ board"></svg>
+                    <div class="status" id="status">Your turn.</div>
+                </div>
+            </section>
+        </div>
+        
+        <!-- GAME OVER MODAL -->
+        <div id="gameOver" class="modal" role="dialog" aria-modal="true" aria-labelledby="goTitle" style="position:fixed;inset:0;display:none;justify-content:center;align-items:center;background:rgba(0,0,0,.45)">
+            <div class="card" style="background:#fff;border-radius:16px;padding:20px;width:min(92vw,520px);border:1px solid #e5e7eb;box-shadow:0 20px 60px rgba(0,0,0,.25);text-align:center">
+                <h2 id="goTitle" style="margin:0 0 8px;font-size:28px"></h2>
+                <p id="goText" style="margin:0 0 16px;color:#334155"></p>
+                <div class="actions" style="display:flex;gap:12px;justify-content:center">
+                    <button id="goMenu">Main Menu</button>
+                    <button id="goAgain" class="cta">Play Again</button>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            (function(){
+                const CENTER_NODE = 9;
+                const CROSS_CHOICES = [[6,12],[7,11],[8,10]];
+                
+                // ---------- URL PARAMS FOR NETPLAY ----------
+                const url = new URL(location.href);
+                const ROOM_ID   = url.searchParams.get('room');          // e.g. "test"
+                const NETPLAY   = !!ROOM_ID;                              // net mode if room present
+                const ROLE      = (url.searchParams.get('role')||'host').toLowerCase(); // 'host' | 'guest'
+                const STARTROLE = (url.searchParams.get('start')||'host').toLowerCase();// who starts: 'host'|'guest'
+                const MY_CONTROLLER = (ROLE === 'host') ? 'player' : 'ai'; // which side this device controls
+                
+                const WS_URL = NETPLAY
+                ? `wss://crossiq-rooms.kushal-s-kadam.workers.dev/room/${encodeURIComponent(ROOM_ID)}`
+                : null;
+                
+                // Tiny hint + control switch on the menu when in netplay mode
+                const netHint = document.getElementById('netHint');
+                const localControls = document.getElementById('localControls');
+                const netControls   = document.getElementById('netControls');
+                const netRoleHost   = document.getElementById('netRoleHost');
+                const netRoleGuest  = document.getElementById('netRoleGuest');
+                const roomNameLabel = document.getElementById('roomNameLabel');
+                const roomNameLabelGuest = document.getElementById('roomNameLabelGuest');
+                const netSideSelect = document.getElementById('net_side');
+
+                if (NETPLAY) {
+                  if (netHint) {
+                    netHint.style.display = '';
+                    netHint.textContent = `Netplay: room="${ROOM_ID}", role="${ROLE}". Host will randomize who starts.`;
+                  }
+
+                  if (localControls) localControls.style.display = 'none';
+                  if (netControls)   netControls.style.display   = 'flex';
+
+                  if (ROLE === 'host') {
+                    if (netRoleHost)  netRoleHost.style.display  = 'block';
+                    if (netRoleGuest) netRoleGuest.style.display = 'none';
+                    if (roomNameLabel) roomNameLabel.textContent = ROOM_ID || '(unnamed)';
+                  } else {
+                    if (netRoleHost)  netRoleHost.style.display  = 'none';
+                    if (netRoleGuest) netRoleGuest.style.display = 'block';
+                    if (roomNameLabelGuest) roomNameLabelGuest.textContent = ROOM_ID || '(unnamed)';
+                    if (netSideSelect) netSideSelect.disabled = true; // guest can't choose side
+                  }
+                } else {
+                  if (localControls) localControls.style.display = 'flex';
+                  if (netControls)   netControls.style.display   = 'none';
+                }
+
+                
+                const X={L:120,C:300,R:480}, Y={T0:40,T:120,U:200,M:290,L:380,B:460,B0:540};
+                const nodes=[
+                             {id:0,x:X.L,y:Y.T0},{id:1,x:X.C,y:Y.T0},{id:2,x:X.R,y:Y.T0},
+                             {id:3,x:X.L,y:Y.T},{id:4,x:X.C,y:Y.T},{id:5,x:X.R,y:Y.T},
+                             {id:6,x:X.L,y:Y.U},{id:7,x:X.C,y:Y.U},{id:8,x:X.R,y:Y.U},
+                             {id:9,x:X.C,y:Y.M},
+                             {id:10,x:X.L,y:Y.L},{id:11,x:X.C,y:Y.L},{id:12,x:X.R,y:Y.L},
+                             {id:13,x:X.L,y:Y.B},{id:14,x:X.C,y:Y.B},{id:15,x:X.R,y:Y.B},
+                             {id:16,x:X.L,y:Y.B0},{id:17,x:X.C,y:Y.B0},{id:18,x:X.R,y:Y.B0}
+                             ];
+                             
+                             const edges=[
+                                          [3,4],[4,5],[3,6],[5,8],[6,7],[7,8],
+                                          [4,7],[7,9],[9,11],[11,14],
+                                          [6,9],[8,9],[10,9],[12,9],
+                                          [10,11],[11,12],[10,13],[12,15],[13,14],[14,15],
+                                          [0,3],[1,4],[2,5],
+                                          [16,13],[17,14],[18,15]
+                                          ];
+                                          
+                                          const menu=document.getElementById('menu'), game=document.getElementById('game');
+                                          const modal=document.getElementById('gameOver'), goTitle=document.getElementById('goTitle'), goText=document.getElementById('goText');
+                                          const board=document.getElementById('board'), statusEl=document.getElementById('status');
+                                          const turnBadge=document.getElementById('turnBadge');
+                                          const crossoverBtn=document.getElementById('crossoverBtn');
+                                          
+                                          const DIAMOND_START=[13,14,15], CONE_START=[3,4,5];
+                                          const TOP_GOALS=[0,1,2], BOT_GOALS=[16,17,18];
+                                          
+                                          const SETTINGS={ opponent:'computer' };
+                                          const STATE={
+                                              turn:'player', firstMover:null, selected:null, lock:false,
+                                              pieces:{ player:[], ai:[] },
+                                              locked:{ player:[false,false,false], ai:[false,false,false] },
+                                              crossover:{ granted:false, onceFor:null, used:false }
+                                          };
+                                          let ROLES=null;
+                                          // Lobby state for netplay: host’s chosen side + which role starts
+                                          let LOBBY = {
+                                            hostSide: 'diamonds',   // 'diamonds' or 'cones' – chosen by host
+                                            starterRole: 'host'     // 'host' or 'guest'
+                                          };
+                                          
+                                          const setStatus = (s)=>{ statusEl.textContent=s; };
+                                          const setTurnBadge=(who,initial=false)=>{
+                                              turnBadge.textContent=(initial?'Starts: ':'Turn: ')+who;
+                                              turnBadge.classList.remove('dia','tri');
+                                              if(who==='Diamonds') turnBadge.classList.add('dia'); else if(who==='Cones') turnBadge.classList.add('tri');
+                                          };
+                                          const refreshTurnBadge=(initial=false)=>{
+                                              const sideType=(STATE.turn==='player')?ROLES.CONTROLS.playerSide:ROLES.CONTROLS.aiSide;
+                                              setTurnBadge(sideType==='diamonds'?'Diamonds':'Cones', initial);
+                                          };
+                                          
+                                          const occupied=(id)=>STATE.pieces.player.includes(id)||STATE.pieces.ai.includes(id);
+                                          const occupantAt=(id)=> STATE.pieces.player.includes(id) ? 'player' : (STATE.pieces.ai.includes(id) ? 'ai' : null);
+                                          
+                                          function el(tag,attrs,cls){ const e=document.createElementNS('http://www.w3.org/2000/svg',tag);
+                                              for(const k in attrs)e.setAttribute(k,attrs[k]); if(cls)e.setAttribute('class',cls); return e; }
+                                          
+                                          function draw(){
+                                              while(board.firstChild) board.removeChild(board.firstChild);
+                                              for(const [a,b] of edges){ const A=nodes[a],B=nodes[b]; board.appendChild(el('line',{x1:A.x,y1:A.y,x2:B.x,y2:B.y},'edge')); }
+                                              for(const n of nodes){ board.appendChild(el('circle',{cx:n.x,cy:n.y,r:10},'nodeDot')); }
+                                              ROLES.playerGoals.concat(ROLES.aiGoals).forEach(id=>{ const g=nodes[id]; board.appendChild(el('rect',{x:g.x-22,y:g.y-22,width:44,height:44,rx:6},'goal')); });
+                                              drawPieces('ai'); drawPieces('player');
+                                              updateCrossoverIndicator();
+                                          }
+                                          
+                                          function drawPieces(controller){
+                                              for(const [idx,id] of STATE.pieces[controller].entries()){
+                                                  const n=nodes[id]; const locked=STATE.locked[controller][idx];
+                                                  
+                                                  // ----- Only let THIS device click its own side in netplay -----
+                                                  let isHuman;
+                                                  if (NETPLAY) {
+                                                      isHuman = (controller === MY_CONTROLLER);
+                                                  } else {
+                                                      // original behavior: human vs computer or human vs human (same device)
+                                                      isHuman = (SETTINGS.opponent==='computer') ? (controller==='player') : true;
+                                                  }
+                                                  
+                                                  const pieceType=(controller==='player')?ROLES.CONTROLS.playerSide:ROLES.CONTROLS.aiSide;
+                                                  if(pieceType==='cones'){
+                                                      const tri=el('polygon',{points:`${n.x},${n.y-22} ${n.x-18},${n.y+16} ${n.x+18},${n.y+16}`},'tri');
+                                                      if(isHuman && STATE.turn===controller && !STATE.lock && !locked) tri.addEventListener('click',()=>onPieceClick(controller,idx), {passive:true});
+                                                      board.appendChild(tri);
+                                                  } else {
+                                                      const dia=el('polygon',{points:`${n.x},${n.y-22} ${n.x-22},${n.y} ${n.x},${n.y+22} ${n.x+22},${n.y}`},'dia');
+                                                      if(isHuman && STATE.turn===controller && !STATE.lock && !locked) dia.addEventListener('click',()=>onPieceClick(controller,idx), {passive:true});
+                                                      board.appendChild(dia);
+                                                  }
+                                              }
+                                          }
+                                          
+                                          function computeRoles(){
+                                              const yourSide=document.getElementById('m_side').value;
+                                              const startOpt=document.getElementById('m_start').value;
+                                              const aiSide=(yourSide==='diamonds')?'cones':'diamonds';
+                                              const startSide=(startOpt==='random')?(Math.random()<0.5?'diamonds':'cones'):startOpt;
+                                              return {
+                                                  CONTROLS:{ playerSide:yourSide, aiSide:aiSide },
+                                                  playerStart: (yourSide==='diamonds')?DIAMOND_START.slice():CONE_START.slice(),
+                                                  aiStart:     (yourSide==='diamonds')?CONE_START.slice():DIAMOND_START.slice(),
+                                                  playerGoals: (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
+                                                  aiGoals:     (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
+                                                  blockPlayerZeros: (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
+                                                  blockAIZeros:     (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
+                                                  firstTurn: (startSide===yourSide)?'player':'ai'
+                                              };
+                                          }
+                                          
+                                          // ---------- CROSSOVER RULES ----------
+                                          function opponent(side){ return side==='player' ? 'ai' : 'player'; }
+                                          
+                                          function isCrossoverActiveNow(){
+                                              if(!STATE.crossover.granted) return false;
+                                              if(STATE.crossover.used) return false;
+                                              const onCenter = occupantAt(CENTER_NODE);
+                                              if(!onCenter) return false;
+                                              return STATE.turn === STATE.crossover.onceFor;
+                                          }
+                                          
+                                          function eligibleCrossoverPairs(){
+                                              if(!isCrossoverActiveNow()) return [];
+                                              return CROSS_CHOICES.filter(([u,v])=>{
+                                                  const uOcc = occupied(u), vOcc = occupied(v);
+                                                  return (uOcc && !vOcc) || (vOcc && !uOcc);
+                                              });
+                                          }
+                                          
+                                          function isCrossoverEdge(a,b){
+                                              return CROSS_CHOICES.some(([u,v])=> (a===u && b===v) || (a===v && b===u));
+                                          }
+                                          
+                                          function maybeGrantCrossover(playerJustMoved, dstSquare){
+                                              if(STATE.crossover.granted) return;
+                                              if(dstSquare === CENTER_NODE){
+                                                  STATE.crossover.granted = true;
+                                                  STATE.crossover.onceFor = opponent(playerJustMoved);
+                                                  updateCrossoverIndicator();
+                                              }
+                                          }
+                                          
+                                          function neighbors(id){
+                                              const out=[];
+                                              for(const [a,b] of edges){ if(a===id) out.push(b); else if(b===id) out.push(a); }
+                                              if(isCrossoverActiveNow()){
+                                                  for(const [u,v] of eligibleCrossoverPairs()){
+                                                      if(id===u && !occupied(v)) out.push(v);
+                                                      if(id===v && !occupied(u)) out.push(u);
+                                                  }
+                                              }
+                                              return out;
+                                          }
+                                          
+                                          function legalMoves(side, idx){
+                                              if(STATE.locked[side][idx]) return [];
+                                              const here = STATE.pieces[side][idx];
+                                              const blockSet=new Set(side==='player'?ROLES.blockPlayerZeros:ROLES.blockAIZeros);
+                                              return neighbors(here).filter(nb=>{
+                                                  if(occupied(nb)) return false;
+                                                  if(blockSet.has(nb)) return false;
+                                                  return true;
+                                              });
+                                          }
+                                          
+                                          function maybeLock(side, idx){
+                                              const pos=STATE.pieces[side][idx];
+                                              if(side==='player' && ROLES.playerGoals.includes(pos)) STATE.locked.player[idx]=true;
+                                              if(side==='ai' && ROLES.aiGoals.includes(pos)) STATE.locked.ai[idx]=true;
+                                          }
+                                          const atGoals=(side)=>STATE.locked[side].every(Boolean);
+                                          
+                                          function applyMove(st,side,idx,to){
+                                              const from = st.pieces[side][idx];
+                                              const preLive = (
+                                                               st.crossover.granted && !st.crossover.used &&
+                                                               (st.pieces.player.includes(CENTER_NODE) || st.pieces.ai.includes(CENTER_NODE)) &&
+                                                               st.turn === st.crossover.onceFor
+                                                               );
+                                                               const crossing = isCrossoverEdge(from, to);
+                                                               const willConsume = preLive && crossing;
+                                                               
+                                                               const ns={
+                                                                   turn:(side==='player')?'ai':'player',
+                                                                   selected:null,
+                                                                   pieces:{player:st.pieces.player.slice(),ai:st.pieces.ai.slice()},
+                                                                   locked:{player:st.locked.player.slice(),ai:st.locked.ai.slice()},
+                                                                   lock:false,
+                                                                   firstMover: st.firstMover,
+                                                                   crossover: JSON.parse(JSON.stringify(st.crossover))
+                                                               };
+                                                               
+                                                               ns.pieces[side][idx]=to;
+                                                               
+                                                               if(!ns.crossover.granted && to===CENTER_NODE){
+                                                                   ns.crossover.granted = true;
+                                                                   ns.crossover.onceFor = (side==='player') ? 'ai' : 'player';
+                                                               }
+                                                               
+                                                               if(willConsume){
+                                                                   ns.crossover.used = true;
+                                                                   setStatus('Crossover consumed.');
+                                                               }
+                                                               
+                                                               if(side==='player' && ROLES.playerGoals.includes(to)) ns.locked.player[idx]=true;
+                                                               if(side==='ai' && ROLES.aiGoals.includes(to)) ns.locked.ai[idx]=true;
+                                                               return ns;
+                                          }
+                                          
+                                          function sideLabelForController(controller){
+                                              const side = (controller==='player') ? ROLES.CONTROLS.playerSide : ROLES.CONTROLS.aiSide;
+                                              return side==='diamonds' ? 'Diamonds' : 'Cones';
+                                          }
+                                          
+                                          function updateCrossoverIndicator(){
+                                              if(!STATE.crossover.granted){
+                                                  crossoverBtn.style.display='none';
+                                                  return;
+                                              }
+                                              const label = sideLabelForController(STATE.crossover.onceFor);
+                                              if(STATE.crossover.used){
+                                                  crossoverBtn.textContent = '⚡ Crossover used';
+                                                  crossoverBtn.classList.add('muted');
+                                                  crossoverBtn.disabled = true;
+                                                  crossoverBtn.style.display='';
+                                              }else{
+                                                  crossoverBtn.textContent = '⚡ Crossover activated: ' + label;
+                                                  crossoverBtn.classList.remove('muted');
+                                                  crossoverBtn.disabled = true;
+                                                  crossoverBtn.style.display='';
+                                              }
+                                          }
+                                          
+                                          // ---------- SMART AI (unchanged; disabled in netplay) ----------
+                                          function dist(from,to){
+                                              if(from===to) return 0;
+                                              const q=[from], seen=new Set([from]); let d=0;
+                                              while(q.length){
+                                                  d++;
+                                                  for(let s=q.length;s>0;s--){
+                                                      const cur=q.shift();
+                                                      for(const nb of neighbors(cur)){
+                                                          if(seen.has(nb)) continue;
+                                                          if(nb===to) return d;
+                                                          seen.add(nb); q.push(nb);
+                                                      }
+                                                  }
+                                              }
+                                              return 99;
+                                          }
+                                          
+                                          function enumerateMoves(st,side){
+                                              const out=[];
+                                              for(let i=0;i<3;i++){
+                                                  if(st.locked[side][i]) continue;
+                                                  const here=st.pieces[side][i];
+                                                  const blockSet = new Set(side==='player'?ROLES.blockPlayerZeros:ROLES.blockAIZeros);
+                                                  for(const nb of neighbors(here)){
+                                                      if(st.pieces.player.includes(nb) || st.pieces.ai.includes(nb)) continue;
+                                                      if(blockSet.has(nb)) continue;
+                                                      out.push({idx:i,from:here,to:nb});
+                                                  }
+                                              }
+                                              return out;
+                                          }
+                                          
+                                          function centerOccupiedBy(st){
+                                              if (st.pieces.player.includes(9)) return 'player';
+                                              if (st.pieces.ai.includes(9)) return 'ai';
+                                              return null;
+                                          }
+                                          
+                                          function mobility(st, side){
+                                              let m=0;
+                                              for(let i=0;i<3;i++){
+                                                  if(st.locked[side][i]) continue;
+                                                  const here=st.pieces[side][i];
+                                                  const blockSet=new Set(side==='player'?ROLES.blockPlayerZeros:ROLES.blockAIZeros);
+                                                  for(const nb of neighbors(here)){
+                                                      if(st.pieces.player.includes(nb) || st.pieces.ai.includes(nb)) continue;
+                                                      if(blockSet.has(nb)) continue;
+                                                      m++;
+                                                  }
+                                              }
+                                              return m;
+                                          }
+                                          
+                                          function evalAI(st){
+                                              const bestDist = (side, pos) => Math.min(...(side==='ai'?ROLES.aiGoals:ROLES.playerGoals).map(g=>dist(pos,g)));
+                                              let aiProg=0, plProg=0;
+                                              for(let i=0;i<3;i++){
+                                                  const aPos=st.pieces.ai[i], pPos=st.pieces.player[i];
+                                                  aiProg += st.locked.ai[i] ? 50 : (30 - bestDist('ai', aPos));
+                                                  plProg += st.locked.player[i] ? 50 : (30 - bestDist('player', pPos));
+                                              }
+                                              let centerScore=0;
+                                              const onC = centerOccupiedBy(st);
+                                              if(onC==='ai') centerScore -= 3;
+                                              else if(onC==='player') centerScore += 3;
+                                              let cross=0;
+                                              if (st.crossover.granted && !st.crossover.used){
+                                                  if (st.turn === st.crossover.onceFor){
+                                                      cross += (st.turn==='ai') ? 8 : -8;
+                                                  }
+                                              }
+                                              const aiMob = mobility(st,'ai');
+                                              const plMob = mobility(st,'player');
+                                              const mob = (aiMob - plMob) * 0.6;
+                                              const lockAdv = (st.locked.ai.filter(Boolean).length - st.locked.player.filter(Boolean).length) * 6;
+                                              return (aiProg - plProg) + centerScore + cross + mob + lockAdv;
+                                          }
+                                          
+                                          function scoreMoveHeur(st, side, m){
+                                              const useCross = isCrossoverEdge(m.from, m.to) ? 5 : 0;
+                                              const goals = (side==='ai'?ROLES.aiGoals:ROLES.playerGoals);
+                                              const before = Math.min(...goals.map(g=>dist(m.from, g)));
+                                              const after  = Math.min(...goals.map(g=>dist(m.to, g)));
+                                              const step = (before - after);
+                                              return (useCross*3) + step;
+                                          }
+                                          
+                                          const TT = new Map();
+                                          function hashKey(st){
+                                              return [
+                                                      st.turn,
+                                                      st.pieces.player.join('-'),
+                                                      st.pieces.ai.join('-'),
+                                                      st.locked.player.map(n=>n?1:0).join(''),
+                                                      st.locked.ai.map(n=>n?1:0).join(''),
+                                                      st.crossover.granted?1:0,
+                                                      st.crossover.used?1:0,
+                                                      st.crossover.onceFor||'-'
+                                                      ].join('|');
+                                          }
+                                          
+                                          function winner(st){
+                                              const playerWin = st.locked.player.every(Boolean);
+                                              const aiWin = st.locked.ai.every(Boolean);
+                                              if(playerWin) return 'player';
+                                              if(aiWin) return 'ai';
+                                              return null;
+                                          }
+                                          
+                                          function applyMoveClone(st,side,idx,to){ return applyMove(st,side,idx,to); }
+                                          
+                                          function alphaBeta(st, depth, alpha, beta, maximizing, deadlineMs){
+                                              if(Date.now() > deadlineMs) return {score: evalAI(st), cutoff:true};
+                                              const win = winner(st);
+                                              if(win) return {score: (win==='ai'? 9999 : -9999)};
+                                              if(depth===0) return {score: evalAI(st)};
+                                              
+                                              const side = maximizing ? 'ai' : 'player';
+                                              const moves = enumerateMoves(st, side);
+                                              if(!moves.length){
+                                                  const ns = Object.assign({}, st, { turn: (side==='ai')?'player':'ai' });
+                                                  return alphaBeta(ns, depth-1, alpha, beta, !maximizing, deadlineMs);
+                                              }
+                                              
+                                              moves.sort((a,b)=> scoreMoveHeur(st, side, b) - scoreMoveHeur(st, side, a));
+                                              
+                                              const key = hashKey(st);
+                                              const tt = TT.get(key);
+                                              if(tt && tt.depth >= depth){
+                                                  return {score: tt.score};
+                                              }
+                                              
+                                              let bestMove=null;
+                                              
+                                              if(maximizing){
+                                                  let value = -1e9;
+                                                  for(const m of moves){
+                                                      const s2 = applyMoveClone(st, side, m.idx, m.to);
+                                                      const r = alphaBeta(s2, depth-1, alpha, beta, false, deadlineMs);
+                                                      if(r.cutoff) return r;
+                                                      if(r.score > value){ value=r.score; bestMove=m; }
+                                                      alpha = Math.max(alpha, value);
+                                                      if(alpha >= beta) break;
+                                                  }
+                                                  TT.set(key, {depth, score:value});
+                                                  return {score:value, move:bestMove};
+                                              }else{
+                                                  let value = 1e9;
+                                                  for(const m of moves){
+                                                      const s2 = applyMoveClone(st, side, m.idx, m.to);
+                                                      const r = alphaBeta(s2, depth-1, alpha, beta, true, deadlineMs);
+                                                      if(r.cutoff) return r;
+                                                      if(r.score < value){ value=r.score; bestMove=m; }
+                                                      beta = Math.min(beta, value);
+                                                      if(alpha >= beta) break;
+                                                  }
+                                                  TT.set(key, {depth, score:value});
+                                                  return {score:value, move:bestMove};
+                                              }
+                                          }
+                                          
+                                          function chooseSmart(st){
+                                              const timeBudgetMs = 260;
+                                              const deadline = Date.now() + timeBudgetMs;
+                                              TT.clear();
+                                              let best=null;
+                                              for(let d=2; d<=6; d++){
+                                                  const r = alphaBeta(st, d, -1e9, 1e9, true, deadline);
+                                                  if(r.cutoff) break;
+                                                  if(r.move) best = r.move;
+                                              }
+                                              if(!best){
+                                                  const mv=enumerateMoves(st,'ai');
+                                                  return mv.length ? mv.sort((a,b)=> scoreMoveHeur(st,'ai',b)-scoreMoveHeur(st,'ai',a))[0] : null;
+                                              }
+                                              return best;
+                                          }
+                                          
+                                          function chooseGreedy(st){
+                                              const mv=enumerateMoves(st,'ai');
+                                              if(!mv.length) return null;
+                                              let best=null,score=-1e9;
+                                              for(const m of mv){
+                                                  const sc = scoreMoveHeur(st,'ai',m);
+                                                  if(sc>score || (sc===score && Math.random()<.3)){ score=sc; best=m; }
+                                              }
+                                              return best;
+                                          }
+                                          
+                                          function chooseLook1(st){
+                                              const mv=enumerateMoves(st,'ai'); if(!mv.length) return null;
+                                              let best=null,score=-1e9;
+                                              for(const m of mv){
+                                                  const s1=applyMoveClone(st,'ai',m.idx,m.to);
+                                                  const pl=enumerateMoves(s1,'player');
+                                                  let worst=Infinity;
+                                                  if(!pl.length) worst=evalAI(s1);
+                                                  else for(const pm of pl){
+                                                      const sc=evalAI(applyMoveClone(s1,'player',pm.idx,pm.to));
+                                                      if(sc<worst) worst=sc;
+                                                  }
+                                                  if(worst>score){ score=worst; best=m; }
+                                              }
+                                              return best;
+                                          }
+                                          
+                                          const chooser = ()=>{
+                                              const mode = document.getElementById('m_aiLevel').value;
+                                              if(mode==='smart') return chooseSmart;
+                                              if(mode==='look1') return chooseLook1;
+                                              return chooseGreedy;
+                                          };
+                                          // ---------- End SMART AI ----------
+                                          
+                                          function onPieceClick(side,idx){
+                                              if(STATE.lock||STATE.turn!==side) return;
+                                              
+                                              // In netplay, only allow this device to move its side
+                                              if (NETPLAY && side !== MY_CONTROLLER) return;
+                                              
+                                              if(SETTINGS.opponent==='computer' && side!=='player' && !NETPLAY) return;
+                                              const moves=legalMoves(side,idx);
+                                              STATE.selected={side,idx,moves}; draw(); setStatus('Choose destination…');
+                                              for(const to of moves){
+                                                  const n=nodes[to];
+                                                  const h=el('circle',{cx:n.x,cy:n.y,r:18},null);
+                                                  h.setAttribute('fill','#dc2626');
+                                                  h.setAttribute('opacity','0.30');
+                                                  const hit=el('rect',{x:n.x-28,y:n.y-28,width:56,height:56,fill:'transparent'});
+                                                  hit.style.cursor='pointer';
+                                                  hit.addEventListener('click',()=>onMoveChoose(side,to), {passive:true});
+                                                  board.appendChild(h); board.appendChild(hit);
+                                              }
+                                          }
+                                          
+                                          function onMoveChoose(side,to){
+                                              if(STATE.lock) return;
+                                              if(!STATE.selected || STATE.selected.side!==side) return;
+                                              
+                                              // Netplay: enforce local control
+                                              if (NETPLAY && side !== MY_CONTROLLER) return;
+                                              
+                                              const idx=STATE.selected.idx; STATE.selected=null;
+                                              Object.assign(STATE, applyMove(STATE,side,idx,to)); draw();
+                                              maybeGrantCrossover(side, to);
+                                              maybeLock(side,idx);
+                                              
+                                              // ---- broadcast to room (if netplay) ----
+                                              try { if (NETPLAY) sendMove({ idx, to }); } catch {}
+                                              
+                                              if(STATE.locked.player.every(Boolean) || STATE.locked.ai.every(Boolean)){
+                                                  const w = STATE.locked.player.every(Boolean) ? 'player' : 'ai';
+                                                  return endGame(w);
+                                              }
+                                              if(!NETPLAY && SETTINGS.opponent==='computer' && STATE.turn==='ai'){
+                                                  refreshTurnBadge(); STATE.lock=true; setStatus('Computer thinking…'); setTimeout(aiTurn, 80);
+                                              } else {
+                                                  refreshTurnBadge(); setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
+                                              }
+                                          }
+                                          
+                                          function aiTurn(){
+                                              const mv = (chooser())(STATE) || (function fallback(){ const all=enumerateMoves(STATE,'ai'); return all.length ? all[Math.floor(Math.random()*all.length)] : null; })();
+                                              if(!mv){ STATE.turn='player'; STATE.lock=false; draw(); refreshTurnBadge(); return setStatus('Computer passes. Your turn.'); }
+                                              Object.assign(STATE, applyMove(STATE,'ai',mv.idx,mv.to)); draw();
+                                              maybeGrantCrossover('ai', STATE.pieces.ai[mv.idx]);
+                                              maybeLock('ai',mv.idx);
+                                              if(STATE.locked.player.every(Boolean) || STATE.locked.ai.every(Boolean)){
+                                                  const w = STATE.locked.player.every(Boolean) ? 'player' : 'ai';
+                                                  return endGame(w);
+                                              }
+                                              STATE.lock=false; refreshTurnBadge(); setStatus('Your turn.');
+                                          }
+                                          
+                                          function endGame(w){
+                                              STATE.lock=true;
+                                              const humanSide = ROLES.CONTROLS.playerSide;
+                                              const winnerLabel = (w==='player') ? (humanSide==='diamonds'?'Diamonds':'Cones')
+                                              : (ROLES.CONTROLS.aiSide==='diamonds'?'Diamonds':'Cones');
+                                              setStatus(winnerLabel+' win!');
+                                              goTitle.textContent = winnerLabel+' win! 🎉';
+                                              goText.textContent = 'Want another round?';
+                                              modal.style.display='flex';
+                                          }
+                                          
+                                          function resetWithRoles(){
+                                              STATE.pieces.player = ROLES.playerStart.slice();
+                                              STATE.pieces.ai     = ROLES.aiStart.slice();
+                                              STATE.locked = { player:[false,false,false], ai:[false,false,false] };
+                                              STATE.selected = null;
+                                              STATE.crossover = { granted:false, onceFor:null, used:false };
+                                          }
+                                          
+                                          function newGame(initial=false){
+                                            const opp = document.getElementById('m_opponent')?.value;
+                                            const ai  = document.getElementById('m_aiLevel')?.value;
+
+                                            // In netplay, always human vs human
+                                            SETTINGS.opponent = NETPLAY ? 'human' : (opp || 'computer');
+
+                                            if (NETPLAY) {
+                                              // --- NETPLAY: host side + who starts are decided in LOBBY ---
+                                              const hostSide   = LOBBY.hostSide   || 'diamonds';
+                                              const guestSide  = (hostSide === 'diamonds') ? 'cones' : 'diamonds';
+                                              const starterRole = LOBBY.starterRole || 'host'; // 'host' or 'guest'
+
+                                              // In network protocol, 'player' controller is always host, 'ai' is always guest
+                                              ROLES = {
+                                                CONTROLS:{ playerSide: hostSide, aiSide: guestSide },
+                                                playerStart: (hostSide==='diamonds') ? DIAMOND_START.slice() : CONE_START.slice(),
+                                                aiStart:     (hostSide==='diamonds') ? CONE_START.slice()   : DIAMOND_START.slice(),
+                                                playerGoals: (hostSide==='diamonds') ? TOP_GOALS : BOT_GOALS,
+                                                aiGoals:     (hostSide==='diamonds') ? BOT_GOALS : TOP_GOALS,
+                                                blockPlayerZeros: (hostSide==='diamonds') ? BOT_GOALS : TOP_GOALS,
+                                                blockAIZeros:     (hostSide==='diamonds') ? TOP_GOALS : BOT_GOALS
+                                              };
+
+                                              STATE.turn = (starterRole === 'host') ? 'player' : 'ai';
+                                            } else {
+                                              // --- LOCAL / AI MODE: original behaviour ---
+                                              const yourSide = document.getElementById('m_side').value;
+                                              const startOpt = document.getElementById('m_start').value;
+
+                                              ROLES = (function compute(){
+                                                const aiSide=(yourSide==='diamonds')?'cones':'diamonds';
+                                                const startSide=(startOpt==='random')
+                                                  ? (Math.random()<0.5?'diamonds':'cones')
+                                                  : startOpt;
+                                                return {
+                                                  CONTROLS:{ playerSide:yourSide, aiSide:aiSide },
+                                                  playerStart: (yourSide==='diamonds')?DIAMOND_START.slice():CONE_START.slice(),
+                                                  aiStart:     (yourSide==='diamonds')?CONE_START.slice():DIAMOND_START.slice(),
+                                                  playerGoals: (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
+                                                  aiGoals:     (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
+                                                  blockPlayerZeros: (yourSide==='diamonds')?BOT_GOALS:TOP_GOALS,
+                                                  blockAIZeros:     (yourSide==='diamonds')?TOP_GOALS:BOT_GOALS,
+                                                  firstTurn: (startSide===yourSide)?'player':'ai'
+                                                };
+                                              })();
+
+                                              STATE.turn = ROLES.firstTurn;
+                                            }
+
+                                            STATE.firstMover = STATE.turn;
+
+                                            resetWithRoles(); draw(); refreshTurnBadge(true);
+                                            modal.style.display='none';
+
+                                            if(!NETPLAY && SETTINGS.opponent==='computer' && STATE.turn==='ai'){
+                                              setStatus('Computer starts…'); STATE.lock=true; setTimeout(aiTurn,100);
+                                            } else {
+                                              setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
+                                            }
+                                          }
+                                          
+                                          document.getElementById('startBtn').addEventListener('click', ()=>{
+                                            if (NETPLAY) {
+                                              if (ROLE === 'host') {
+                                                // Host picks their side
+                                                const hostSideSelect = document.getElementById('net_side');
+                                                const hostSide = hostSideSelect ? hostSideSelect.value : 'diamonds';
+
+                                                // Randomly decide who starts: 'host' or 'guest'
+                                                const starterRole = (Math.random() < 0.5) ? 'host' : 'guest';
+
+                                                // Save in lobby state
+                                                LOBBY.hostSide    = hostSide;
+                                                LOBBY.starterRole = starterRole;
+
+                                                // Broadcast start info to guest
+                                                if (ws && ws.readyState === 1) {
+                                                  ws.send(JSON.stringify({
+                                                    type: 'start',
+                                                    hostSide,
+                                                    starterRole,
+                                                    t: Date.now()
+                                                  }));
+                                                }
+
+                                                // Host enters game immediately
+                                                menu.classList.remove('active');
+                                                game.classList.add('active');
+                                                newGame(true);
+                                              } else {
+                                                // Guest cannot start; just wait
+                                                setStatus('Waiting for host to start the game…');
+                                              }
+                                            } else {
+                                              // Local / AI
+                                              menu.classList.remove('active');
+                                              game.classList.add('active');
+                                              newGame(true);
+                                            }
+                                          });
+                                          document.getElementById('backMenu').addEventListener('click', ()=>{
+                                              menu.classList.add('active'); game.classList.remove('active');
+                                          });
+                                          document.getElementById('newGame').addEventListener('click', ()=> newGame(true));
+                                          document.getElementById('goMenu').addEventListener('click', ()=>{
+                                              modal.style.display='none'; menu.classList.add('active'); game.classList.remove('active');
+                                          });
+                                          document.getElementById('goAgain').addEventListener('click', ()=>{
+                                              modal.style.display='none'; newGame(true);
+                                          });
+                                          
+                                          // --------- WEBSOCKET LAYER (netplay only) ---------
+                                          let ws = null;
+                                          if (NETPLAY && WS_URL) {
+                                              try {
+                                                  ws = new WebSocket(WS_URL);
+                                                  ws.onopen    = () => console.log('WS connected → room:', ROOM_ID, 'role:', ROLE);
+                                                  ws.onclose   = () => console.log('WS closed');
+                                                  ws.onerror   = (e) => console.log('WS error', e);
+                                                  ws.onmessage = (evt) => {
+                                                      try { const msg = JSON.parse(evt.data); handleRemote(msg); }
+                                                      catch { console.log('WS msg:', evt.data); }
+                                                  };
+                                              } catch (e) {
+                                                  console.log('WS connect failed', e);
+                                              }
+                                          }
+                                          
+                                          function sendMove(move){
+                                              if (!NETPLAY || !ws || ws.readyState !== 1) return;
+                                              ws.send(JSON.stringify({ type:'move', controller: MY_CONTROLLER, move, t: Date.now() }));
+                                          }
+                                          
+                                          function handleRemote(msg){
+                                            // Host → Guest start handshake
+                                            if (msg.type === 'start') {
+                                              const { hostSide, starterRole } = msg;
+
+                                              LOBBY.hostSide    = hostSide    || 'diamonds';
+                                              LOBBY.starterRole = starterRole || 'host';
+
+                                              // Guest auto-enters game when host starts
+                                              if (ROLE === 'guest' && !game.classList.contains('active')) {
+                                                menu.classList.remove('active');
+                                                game.classList.add('active');
+                                                newGame(true);
+                                              }
+                                              return;
+                                            }
+
+                                            // Regular move messages
+                                            if (msg.type !== 'move') return;
+                                            const { controller, move } = msg;     // controller: 'player'|'ai'
+                                            const { idx, to } = move;
+
+                                            // Ignore echoes from the same controller (safety)
+                                            if (controller === MY_CONTROLLER) return;
+
+                                            Object.assign(STATE, applyMove(STATE, controller, idx, to)); draw();
+                                            maybeGrantCrossover(controller, to);
+                                            maybeLock(controller, idx);
+
+                                            if(STATE.locked.player.every(Boolean) || STATE.locked.ai.every(Boolean)){
+                                              const w = STATE.locked.player.every(Boolean) ? 'player' : 'ai';
+                                              return endGame(w);
+                                            }
+                                            refreshTurnBadge(); setStatus((STATE.turn===MY_CONTROLLER)?'Your turn.':'Opponent turn.');
+                                          }
+            })();
+        </script>
+    </body>
 </html>
